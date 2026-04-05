@@ -1,268 +1,143 @@
-package com.example.stbgateway // Asigură-te că pachetul este corect pentru proiectul tău!
+package com.example.stbgateway
 
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothDevice
-import android.bluetooth.BluetoothSocket
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import org.json.JSONObject
-import java.io.InputStream
-import java.io.OutputStream
-import java.util.Scanner
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothProfile
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
+import android.content.Context
 import java.util.UUID
-import java.util.concurrent.TimeUnit
-import kotlin.concurrent.thread
-
-// Extensie utilă pentru a găsi secvențe de bytes (echivalentul lui .find() din Python)
-fun ByteArray.indexOf(pattern: ByteArray, startIndex: Int = 0): Int {
-    if (pattern.isEmpty()) return -1
-    for (i in startIndex..this.size - pattern.size) {
-        var match = true
-        for (j in pattern.indices) {
-            if (this[i + j] != pattern[j]) {
-                match = false
-                break
-            }
-        }
-        if (match) return i
-    }
-    return -1
-}
 
 @SuppressLint("MissingPermission")
-class BluetoothGateway(private val macAddress: String) {
+class BluetoothGateway(
+    private val context: Context,
+    private val onLog: (String) -> Unit
+) {
 
-    private val MY_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
-    private var socket: BluetoothSocket? = null
+    private val adapter: BluetoothAdapter? = BluetoothAdapter.getDefaultAdapter()
+    private var gatt: BluetoothGatt? = null
+    private var rxCharacteristic: BluetoothGattCharacteristic? = null
 
-    private var currentAppId = ""
-    private var currentUserInfo = ""
+    private val nusServiceUuid =
+        UUID.fromString("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
+    private val nusRxUuid =
+        UUID.fromString("6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
+    private val nusTxUuid =
+        UUID.fromString("6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
 
-    // Inițializăm clientul HTTP o singură dată pentru eficiență
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
-        .build()
-
-    fun startListening() {
-        thread(start = true) {
-            try {
-                // 1. Luăm cheile STB
-                val authPair = generateStbSession()
-                currentAppId = authPair.first
-                currentUserInfo = authPair.second
-
-                // 2. Ne conectăm la Bluetooth
-                val adapter = BluetoothAdapter.getDefaultAdapter()
-                val device: BluetoothDevice = adapter.getRemoteDevice(macAddress)
-                socket = device.createRfcommSocketToServiceRecord(MY_UUID)
-                socket?.connect()
-
-                println("Conectat la HC-05! Aștept comenzi...")
-
-                val inputStream: InputStream = socket!!.inputStream
-                val outputStream: OutputStream = socket!!.outputStream
-                val scanner = Scanner(inputStream)
-
-                // 3. Ascultăm comenzile de la plăcuță
-                while (true) {
-                    if (scanner.hasNextLine()) {
-                        val command = scanner.nextLine().trim()
-                        println("Am primit: $command")
-
-                        if (command.startsWith("REQ:")) {
-                            val stopId = command.split(":")[1]
-
-                            var result = checkStb(currentAppId, currentUserInfo, stopId)
-
-                            if (result == "EXPIRED") {
-                                println("Sesiune expirată, reînnoim...")
-                                val newAuth = generateStbSession()
-                                currentAppId = newAuth.first
-                                currentUserInfo = newAuth.second
-                                result = checkStb(currentAppId, currentUserInfo, stopId)
-                            }
-
-                            // Împachetăm răspunsul cu * și # pentru a fi ușor de citit de C/C++
-                            val pachetFinal = "*$result#\n"
-                            outputStream.write(pachetFinal.toByteArray())
-                            outputStream.flush()
-                            println("Trimis spre placă: $pachetFinal")
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                println("Eroare Gateway: ${e.message}")
-            }
+    fun connectToWatchByName(targetName: String = "ZEPHYR") {
+        val scanner = adapter?.bluetoothLeScanner
+        if (scanner == null) {
+            onLog("BLE scanner indisponibil")
+            return
         }
-    }
 
-    // --- FUNCȚIA DE AUTENTIFICARE (Din Python in Kotlin) ---
-    private fun generateStbSession(): Pair<String, String> {
-        val appId = UUID.randomUUID().toString()
-        val urlAuth = "https://info.stb.ro/api/web/v2-6/proxy/user/auth"
-        val appKey = "gcALgRyZHC,qFonZ=Jde"
-
-        val request = Request.Builder()
-            .url(urlAuth)
-            .header("App-key", appKey)
-            .header("App-Id", appId)
-            .header("Source", "ro.radcom.smartcity.web")
-            .header("Accept", "application/json")
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build()
 
-        try {
-            val response = client.newCall(request).execute()
-            if (response.isSuccessful) {
-                val jsonData = response.body?.string() ?: return Pair("", "")
-                val jsonObject = JSONObject(jsonData)
-                val userInfo = jsonObject.optJSONObject("data")?.optString("userInfo") ?: ""
+        onLog("Pornesc scan BLE pentru: $targetName")
 
-                if (userInfo.isNotEmpty()) {
-                    return Pair(appId, userInfo)
-                }
-            }
-        } catch (e: Exception) {
-            println("Eroare Auth: ${e.message}")
-        }
-        return Pair("", "")
-    }
+        scanner.startScan(null, settings, object : ScanCallback() {
+            override fun onScanResult(callbackType: Int, result: ScanResult) {
+                val device = result.device
+                val name = device.name ?: result.scanRecord?.deviceName ?: "(fara nume)"
+                onLog("Gasit BLE: $name / ${device.address}")
 
-    // --- FUNCȚIA DE DECODARE VARINT ---
-    private fun decodeProtobufVarint(data: ByteArray, startPos: Int): Pair<Int, Int> {
-        var res = 0
-        var shift = 0
-        var pos = startPos
-        while (pos < data.size) {
-            val b = data[pos].toInt()
-            res = res or ((b and 0x7f) shl shift)
-            pos++
-            if ((b and 0x80) == 0) break
-            shift += 7
-        }
-        return Pair(res, pos)
-    }
-
-    // --- FUNCȚIA PRINCIPALĂ DE PARSARE BINARĂ ---
-    private fun checkStb(appId: String, userInfo: String, stopId: String): String {
-        val urlApi = "https://info.stb.ro/api/web/v2-6/lines/stop?stop_id=$stopId"
-
-        val request = Request.Builder()
-            .url(urlApi)
-            .header("App-Id", appId)
-            .header("User-Info", userInfo)
-            .header("Source", "ro.radcom.smartcity.web")
-            .header("Accept", "application/x-protobuf")
-            .build()
-
-        try {
-            val response = client.newCall(request).execute()
-
-            if (response.code == 401 || response.code == 412) return "EXPIRED"
-            if (!response.isSuccessful) return "Eroare Server"
-
-            val data = response.body?.bytes() ?: return "Pachet Gol"
-            val linesFound = mutableMapOf<String, String>()
-            var idx = 0
-
-            while (idx < data.size) {
-                if (data[idx] == 0x0A.toByte()) {
-                    try {
-                        val nameLen = data[idx + 1].toInt()
-                        val lineName = String(data, idx + 2, nameLen, Charsets.UTF_8)
-
-                        if (nameLen in 1..5 && lineName.all { it.isLetterOrDigit() }) {
-                            var endIdx = data.size
-                            var nextSearch = idx + 2 + nameLen
-
-                            // Izolăm blocul
-                            while (true) {
-                                val next0a = data.indexOf(byteArrayOf(0x0A.toByte()), nextSearch)
-                                if (next0a == -1) break
-                                try {
-                                    val nxtLen = data[next0a + 1].toInt()
-                                    if (nxtLen in 1..5) {
-                                        val nxtStr = String(data, next0a + 2, nxtLen, Charsets.UTF_8)
-                                        if (nxtStr.all { it.isLetterOrDigit() } &&
-                                            (nxtStr[0].isDigit() || nxtStr.startsWith("N") || nxtStr.startsWith("R"))) {
-                                            endIdx = next0a
-                                            break
-                                        }
-                                    }
-                                } catch (e: Exception) {}
-                                nextSearch = next0a + 1
-                            }
-
-                            val block = data.copyOfRange(idx + 2 + nameLen, endIdx)
-                            if (!linesFound.containsKey(lineName)) linesFound[lineName] = ""
-
-                            val foundTimesInt = mutableListOf<Int>()
-
-                            // Căutăm prima sosire (0x30, 0x40)
-                            for (marker in listOf(byteArrayOf(0x30), byteArrayOf(0x40))) {
-                                var sPos = 0
-                                while (true) {
-                                    val pos = block.indexOf(marker, sPos)
-                                    if (pos == -1) break
-                                    try {
-                                        val (seconds, _) = decodeProtobufVarint(block, pos + 1)
-                                        if (seconds in 16..17999) foundTimesInt.add(seconds / 60)
-                                    } catch (e: Exception) {}
-                                    sPos = pos + 1
-                                }
-                            }
-
-                            // Căutăm restul sosirilor (0x4A)
-                            var sPosLista = 0
-                            while (true) {
-                                val pos = block.indexOf(byteArrayOf(0x4A), sPosLista)
-                                if (pos == -1) break
-                                try {
-                                    val (msgLen, contentStart) = decodeProtobufVarint(block, pos + 1)
-                                    val subMsg = block.copyOfRange(contentStart, contentStart + msgLen)
-
-                                    val subPos = subMsg.indexOf(byteArrayOf(0x10))
-                                    if (subPos != -1) {
-                                        val (seconds, _) = decodeProtobufVarint(subMsg, subPos + 1)
-                                        if (seconds in 16..17999) foundTimesInt.add(seconds / 60)
-                                    }
-                                } catch (e: Exception) {}
-                                sPosLista = pos + 1
-                            }
-
-                            // Formatare identică cu Python (limita de 3)
-                            if (foundTimesInt.isNotEmpty()) {
-                                val uniqueTimes = foundTimesInt.distinct().sorted().take(3)
-                                val formattedTimes = uniqueTimes.map { m ->
-                                    if (m < 60) "$m min"
-                                    else {
-                                        val h = m / 60
-                                        val remM = m % 60
-                                        val oreStr = if (h == 1) "oră" else "ore"
-                                        if (remM == 0) "$h $oreStr" else "$h $oreStr, $remM min"
-                                    }
-                                }
-                                linesFound[lineName] = formattedTimes.joinToString(", ")
-                            }
-                        }
-                        idx += 2 + nameLen
-                    } catch (e: Exception) {
-                        idx++
-                    }
-                } else {
-                    idx++
+                if (name.equals(targetName, ignoreCase = true)) {
+                    onLog("Am gasit ceasul. Ma conectez...")
+                    scanner.stopScan(this)
+                    gatt?.close()
+                    gatt = device.connectGatt(context, false, gattCallback)
                 }
             }
 
-            // Dacă avem date, le lipim cu '|' între ele
-            if (linesFound.isNotEmpty()) {
-                return linesFound.map { "${it.key}:${it.value}" }.joinToString("|")
+            override fun onBatchScanResults(results: MutableList<ScanResult>) {
+                for (result in results) {
+                    val device = result.device
+                    val name = device.name ?: result.scanRecord?.deviceName ?: "(fara nume)"
+                    onLog("Batch BLE: $name / ${device.address}")
+                }
             }
-            return "Nicio masina"
 
-        } catch (e: Exception) {
-            return "Eroare Script"
+            override fun onScanFailed(errorCode: Int) {
+                onLog("Scan BLE esuat: $errorCode")
+            }
+        })
+    }
+
+    fun sendText(message: String) {
+        val ch = rxCharacteristic
+        val g = gatt
+
+        if (ch == null || g == null) {
+            onLog("RX characteristic indisponibila")
+            return
+        }
+
+        val payload = "*$message#"
+        val chunkSize = 18
+
+        Thread {
+            var index = 0
+            while (index < payload.length) {
+                val end = minOf(index + chunkSize, payload.length)
+                val chunk = payload.substring(index, end)
+
+                ch.value = chunk.toByteArray(Charsets.UTF_8)
+                val ok = g.writeCharacteristic(ch)
+                onLog("Trimit chunk: \"$chunk\" -> ${if (ok) "OK" else "FAIL"}")
+
+                Thread.sleep(80)
+                index = end
+            }
+        }.start()
+    }
+
+    fun disconnect() {
+        gatt?.disconnect()
+        gatt?.close()
+        gatt = null
+        rxCharacteristic = null
+        onLog("Deconectat.")
+    }
+
+    private val gattCallback = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            onLog("onConnectionStateChange status=$status newState=$newState")
+
+            when (newState) {
+                BluetoothProfile.STATE_CONNECTED -> {
+                    onLog("Conectat GATT. Descopar serviciile...")
+                    gatt.discoverServices()
+                }
+
+                BluetoothProfile.STATE_DISCONNECTED -> {
+                    onLog("Deconectat.")
+                }
+            }
+        }
+
+        override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+            onLog("Servicii descoperite, caut NUS...")
+            val service = gatt.getService(nusServiceUuid)
+
+            if (service == null) {
+                onLog("Serviciul NUS nu a fost gasit")
+                return
+            }
+
+            rxCharacteristic = service.getCharacteristic(nusRxUuid)
+
+            if (rxCharacteristic == null) {
+                onLog("RX characteristic nu a fost gasita")
+            } else {
+                onLog("RX characteristic gasita, gata de trimitere")
+            }
         }
     }
 }

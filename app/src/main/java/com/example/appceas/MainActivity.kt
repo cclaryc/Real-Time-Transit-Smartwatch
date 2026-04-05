@@ -8,60 +8,187 @@ import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.stbgateway.BluetoothGateway
+import kotlin.concurrent.thread
 
-class MainActivity : Activity() { // Am schimbat AppCompatActivity în Activity simplu
+class MainActivity : Activity() {
+
+    private var gateway: BluetoothGateway? = null
+    private lateinit var logView: TextView
+    private lateinit var stopIdInput: EditText
+    private lateinit var messageInput: EditText
+
+    private val stbClient = StbClient()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 1. Cerem permisiuni
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN),
-                    1
-                )
-            }
-        }
+        requestBtPermissions()
 
-        // 2. Creăm interfața din cod
-        val layout = LinearLayout(this).apply {
+        val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(50, 50, 50, 50)
+            setPadding(40, 40, 40, 40)
         }
 
-        val macInput = EditText(this).apply {
-            hint = "Adresa MAC"
-            setText("B4:8C:9D:31:5C:3C") // Adresa MAC a laptopului tău
+        val deviceNameInput = EditText(this).apply {
+            hint = "Nume device BLE"
+            setText("ZEPHYR")
+        }
+
+        stopIdInput = EditText(this).apply {
+            hint = "Stop ID"
+            setText("3901")
+        }
+
+        messageInput = EditText(this).apply {
+            hint = "Mesaj manual către ceas"
+            setText("test")
         }
 
         val connectBtn = Button(this).apply {
-            text = "Conectare Bluetooth & Start"
+            text = "Conectare la ceas"
         }
 
-        layout.addView(macInput)
-        layout.addView(connectBtn)
-        setContentView(layout)
+        val sendBtn = Button(this).apply {
+            text = "Trimite test"
+        }
 
-        // 3. Acțiunea butonului
+        val fetchAndSendBtn = Button(this).apply {
+            text = "Ia STB si trimite"
+        }
+
+        val disconnectBtn = Button(this).apply {
+            text = "Deconectare"
+        }
+
+        logView = TextView(this).apply {
+            text = "Log:\n"
+            textSize = 14f
+        }
+
+        val scroll = ScrollView(this).apply {
+            addView(logView)
+        }
+
+        root.addView(deviceNameInput)
+        root.addView(stopIdInput)
+        root.addView(messageInput)
+        root.addView(connectBtn)
+        root.addView(sendBtn)
+        root.addView(fetchAndSendBtn)
+        root.addView(disconnectBtn)
+        root.addView(scroll)
+
+        setContentView(root)
+
+        gateway = BluetoothGateway(this) { msg ->
+            runOnUiThread {
+                logView.append("$msg\n")
+            }
+        }
+
         connectBtn.setOnClickListener {
-            val mac = macInput.text.toString().trim()
-            if (mac.isNotEmpty()) {
-                Toast.makeText(this, "Încerc conectarea la $mac...", Toast.LENGTH_SHORT).show()
+            val name = deviceNameInput.text.toString().trim()
+            if (name.isEmpty()) {
+                Toast.makeText(this, "Numele device-ului nu poate fi gol.", Toast.LENGTH_SHORT).show()
+            } else {
+                appendLog("Incerc conectarea la $name...\n")
+                gateway?.connectToWatchByName(name)
+            }
+        }
 
-                try {
-                    val gateway = BluetoothGateway(mac)
-                    gateway.startListening()
-                } catch (e: Exception) {
-                    Toast.makeText(this, "Eroare la pornire: ${e.message}", Toast.LENGTH_LONG).show()
+        sendBtn.setOnClickListener {
+            val msg = messageInput.text.toString()
+            if (msg.isEmpty()) {
+                Toast.makeText(this, "Mesajul nu poate fi gol.", Toast.LENGTH_SHORT).show()
+            } else {
+                appendLog("Trimit manual: $msg\n")
+                gateway?.sendText(msg)
+            }
+        }
+
+        fetchAndSendBtn.setOnClickListener {
+            val stopId = stopIdInput.text.toString().trim()
+            if (stopId.isEmpty()) {
+                Toast.makeText(this, "Stop ID nu poate fi gol.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            appendLog("Cer date STB pentru statia $stopId...\n")
+
+            thread(start = true) {
+                val result = stbClient.checkStb(stopId)
+
+                runOnUiThread {
+                    appendLog("Rezultat STB: $result\n")
+                    messageInput.setText(result)
                 }
 
-            } else {
-                Toast.makeText(this, "Adresa MAC nu poate fi goală!", Toast.LENGTH_SHORT).show()
+                gateway?.sendText(result)
+            }
+        }
+
+        disconnectBtn.setOnClickListener {
+            appendLog("Deconectare...\n")
+            gateway?.disconnect()
+        }
+    }
+
+    private fun appendLog(msg: String) {
+        runOnUiThread {
+            logView.append(msg)
+        }
+    }
+
+    private fun requestBtPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val needed = mutableListOf<String>()
+
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.BLUETOOTH_SCAN
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                needed.add(Manifest.permission.BLUETOOTH_SCAN)
+            }
+
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.BLUETOOTH_CONNECT
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                needed.add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+
+            if (needed.isNotEmpty()) {
+                ActivityCompat.requestPermissions(this, needed.toTypedArray(), 1)
+            }
+        } else {
+            val needed = mutableListOf<String>()
+
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                needed.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            }
+
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
+            }
+
+            if (needed.isNotEmpty()) {
+                ActivityCompat.requestPermissions(this, needed.toTypedArray(), 2)
             }
         }
     }
