@@ -1,7 +1,9 @@
 # Real-Time-Transit-Smartwatch
-This app has been deployed and developed partially during the Open Hack Day organised by ROSEdu- Zephyr OS workshop led by Dan Tudose and Daniel Baluta.
+This app has been deployed and developed fully by me during the Open Hack Day organised by ROSEdu- Zephyr OS workshop led by Dan Tudose and Daniel Baluta.
 
-![Project Photo](./images/STB_Testing.jpeg)
+<table>
+  <tr>
+    <td>
 
 ## Overview
 
@@ -10,7 +12,15 @@ This repository contains a complete smartwatch-style transport project built aro
 - a **Mobile App**
 - a **Watch App**
 
+The system uses **Bluetooth Low Energy (BLE)** to connect the phone to the watch.
 
+</td>
+    <td>
+      <img src="./images/STB_Testing.jpeg" alt="Project Photo" width="260"/>
+    </td>
+  </tr>
+</table>
+ 
 The phone is responsible for:
 - connecting to the internet
 - requesting live STB bus arrival data
@@ -192,8 +202,9 @@ Add screenshots here.
 
 Example:
 
-![Phone Screen](./images/MobileApp.png)
-
+<p align="center">
+  <img src="./images/MobileApp.png" alt="Project Photo" width="350"/>
+</p>
 
 ---
 
