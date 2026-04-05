@@ -1,5 +1,6 @@
 # Real-Time-Transit-Smartwatch
 This app has been deployed and developed fully by me during the Open Hack Day organised by ROSEdu- Zephyr OS workshop led by Dan Tudose and Daniel Baluta.
+https://ocw.cs.pub.ro/courses/iothings/hackathon?utm_source=luma
 
 <table>
   <tr>
@@ -259,3 +260,4 @@ UI refinement:
 - icons and route badges
 - better payload protocol
 
+## This project has a license
