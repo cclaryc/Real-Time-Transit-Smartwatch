@@ -260,4 +260,6 @@ UI refinement:
 - icons and route badges
 - better payload protocol
 
-## This project has a license
+## License
+
+This project is licensed under the GNU General Public License v3.0.
