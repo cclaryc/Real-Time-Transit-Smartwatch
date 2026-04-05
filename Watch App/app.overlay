@@ -1,0 +1,108 @@
+#include <zephyr/dt-bindings/display/panel.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/pinctrl/esp-pinctrl-common.h>
+#include <zephyr/dt-bindings/pinctrl/esp32s3-gpio-sigmap.h>
+#include <zephyr/dt-bindings/pinctrl/esp32s3-pinctrl.h>
+
+/ {
+	chosen {
+		zephyr,console = &usb_serial;
+		zephyr,shell-uart = &usb_serial;
+		zephyr,display = &gc9a01;
+		zephyr,touch = &cst816s;
+	};
+
+	mipi_dbi {
+		compatible = "zephyr,mipi-dbi-spi";
+		spi-dev = <&spi3>;
+		dc-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio0 3 GPIO_ACTIVE_LOW>;
+		write-only;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		gc9a01: gc9a01@0 {
+			compatible = "galaxycore,gc9x01x";
+			reg = <0>;
+			status = "okay";
+			zephyr,deferred-init;
+			orientation = "180";
+			mipi-max-frequency = <20000000>;
+			mipi-mode = "MIPI_DBI_MODE_SPI_4WIRE";
+			pixel-format = <PANEL_PIXEL_FORMAT_RGB_565>;
+			width = <240>;
+			height = <240>;
+			display-inversion;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		lcd_backlight: lcd_backlight {
+			gpios = <&gpio0 7 GPIO_ACTIVE_HIGH>;
+			label = "LCD backlight";
+		};
+	};
+};
+
+&usb_serial {
+	status = "okay";
+};
+
+&gpio0 {
+	lcd_power_enable {
+		gpio-hog;
+		gpios = <18 GPIO_ACTIVE_HIGH>;
+		output-high;
+	};
+};
+
+&pinctrl {
+	/* LCD is wired to SPI3 on GPIO12/11/13. */
+	spim3_lcd_default: spim3_lcd_default {
+		group1 {
+			pinmux = <SPIM3_MISO_GPIO13>, <SPIM3_SCLK_GPIO12>;
+		};
+
+		group2 {
+			pinmux = <SPIM3_MOSI_GPIO11>;
+			output-low;
+		};
+	};
+
+	i2c1_touch_default: i2c1_touch_default {
+		group1 {
+			pinmux = <I2C1_SDA_GPIO8>, <I2C1_SCL_GPIO9>;
+			bias-pull-up;
+			drive-open-drain;
+			output-high;
+		};
+	};
+};
+
+&spi3 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+	pinctrl-0 = <&spim3_lcd_default>;
+	pinctrl-names = "default";
+	clock-frequency = <20000000>;
+	cs-gpios = <&gpio0 4 GPIO_ACTIVE_LOW>;
+};
+
+&i2c1 {
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	pinctrl-0 = <&i2c1_touch_default>;
+	pinctrl-names = "default";
+
+	cst816s: cst816s@15 {
+		compatible = "hynitron,cst816s";
+		reg = <0x15>;
+		status = "okay";
+		irq-gpios = <&gpio0 1 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+		rst-gpios = <&gpio0 2 GPIO_ACTIVE_LOW>;
+	};
+};
