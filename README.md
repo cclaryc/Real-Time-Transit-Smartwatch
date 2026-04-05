@@ -16,7 +16,7 @@ The system uses **Bluetooth Low Energy (BLE)** to connect the phone to the watch
 
 </td>
     <td>
-      <img src="./images/STB_Testing.jpeg" alt="Project Photo" width="260"/>
+      <img src="./Images/STB_Testing.jpeg" alt="Project Photo" width="260"/>
     </td>
   </tr>
 </table>
@@ -203,7 +203,7 @@ Add screenshots here.
 Example:
 
 <p align="center">
-  <img src="./images/MobileApp.png" alt="Project Photo" width="350"/>
+  <img src="./Images/MobileApp.png" alt="Project Photo" width="350"/>
 </p>
 
 ---
