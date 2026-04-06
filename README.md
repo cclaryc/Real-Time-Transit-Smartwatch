@@ -184,7 +184,6 @@ This keeps the embedded side much simpler and more reliable.
 
 ## Tutorial
 
-> Add the full setup and usage tutorial here.
 
 Suggested sections:
 - toolchain setup
@@ -199,7 +198,6 @@ Suggested sections:
 
 ## Screenshots
 
-Add screenshots here.
 
 Example:
 
@@ -210,10 +208,6 @@ Example:
 ---
 
 ## Development History
-
-This section can be used to document how the project evolved.
-
-Suggested timeline:
 
 ### Phase 1
 Basic watch bring-up with Zephyr:
